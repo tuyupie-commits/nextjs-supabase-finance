@@ -4,29 +4,53 @@ import { createClient } from "@/utils/supabase/server";
 import { revalidatePath } from "next/cache";
 
 export async function joinWithCode(formData: FormData) {
+  // 1️⃣ Lấy & chuẩn hoá mã mời
   const code = String(formData.get("code") || "")
     .trim()
     .toUpperCase();
-  if (!code) return { ok: false, message: "Vui lòng nhập mã mời" };
 
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-    error: uErr,
-  } = await supabase.auth.getUser();
-  if (uErr) return { ok: false, message: uErr.message };
-  if (!user) return { ok: false, message: "Bạn chưa đăng nhập" };
-
-  const { error } = await supabase.rpc("use_invite", { p_code: code });
-
-  if (error) {
-    // trả message thật để bạn biết bị gì (RLS/đủ 2 người/code sai/hết hạn)
-    return { ok: false, message: error.message };
+  if (!code) {
+    return { ok: false, message: "Vui lòng nhập mã mời" };
   }
 
+  // 2️⃣ Tạo supabase server client
+  const supabase = await createClient();
+
+  // 3️⃣ Lấy user hiện tại
+  const {
+    data: { user },
+    error: userErr,
+  } = await supabase.auth.getUser();
+
+  if (userErr) {
+    return { ok: false, message: userErr.message };
+  }
+
+  if (!user) {
+    return { ok: false, message: "Bạn chưa đăng nhập" };
+  }
+
+  // 4️⃣ GỌI RPC use_invite
+  const { data, error } = await supabase.rpc("use_invite", {
+    p_code: code,
+  });
+
+  if (error) {
+    console.error("RPC use_invite error:", error);
+
+    return {
+      ok: false,
+      // message này lấy trực tiếp từ PostgreSQL
+      message: error.message,
+    };
+  }
+
+  // 5️⃣ Revalidate UI
   revalidatePath("/app");
   revalidatePath("/app/settings");
 
-  return { ok: true };
+  return {
+    ok: true,
+    data, // giữ lại để debug nếu cần
+  };
 }
